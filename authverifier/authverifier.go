@@ -38,6 +38,10 @@ type Config struct {
 	Issuer   string // iss esperado nos tokens
 	Audience string // aud que ESTE serviço exige (confused-deputy guard)
 
+	// Obrigatória só para NewPair: aud dos tokens de serviço aceitos por ESTE
+	// serviço (ex.: "likes-manager-internal").
+	ServiceAudience string
+
 	// Opcionais.
 	Leeway             time.Duration            // clock skew tolerado (default 30s)
 	RefreshInterval    time.Duration            // refresh proativo do JWKS (default 5m)
@@ -54,6 +58,35 @@ func New(ctx context.Context, cfg Config) (input.TokenVerifier, error) {
 		return nil, fmt.Errorf("authverifier: JWKSURI, Issuer e Audience são obrigatórios")
 	}
 
+	client, err := startKeys(ctx, cfg)
+	if err != nil {
+		return nil, err
+	}
+	return usecase.NewVerifyUseCase(decoderFor(client, cfg, cfg.Audience), cfg.Revocation), nil
+}
+
+// NewPair devolve o verificador de usuário e o de serviço compartilhando um só
+// cliente JWKS. Cada um exige sua audience, então um token de sessão não passa
+// numa rota interna nem o contrário — a separação é criptográfica, não de rede.
+func NewPair(ctx context.Context, cfg Config) (input.TokenVerifier, input.ServiceTokenVerifier, error) {
+	if cfg.JWKSURI == "" || cfg.Issuer == "" || cfg.Audience == "" {
+		return nil, nil, fmt.Errorf("authverifier: JWKSURI, Issuer e Audience são obrigatórios")
+	}
+	if cfg.ServiceAudience == "" {
+		return nil, nil, fmt.Errorf("authverifier: ServiceAudience é obrigatória para o canal de serviço")
+	}
+
+	client, err := startKeys(ctx, cfg)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	user := usecase.NewVerifyUseCase(decoderFor(client, cfg, cfg.Audience), cfg.Revocation)
+	service := usecase.NewVerifyServiceUseCase(decoderFor(client, cfg, cfg.ServiceAudience))
+	return user, service, nil
+}
+
+func startKeys(ctx context.Context, cfg Config) (*jwks.Client, error) {
 	client, err := jwks.NewClient(jwks.Config{
 		URI:                cfg.JWKSURI,
 		RefreshInterval:    cfg.RefreshInterval,
@@ -66,14 +99,15 @@ func New(ctx context.Context, cfg Config) (input.TokenVerifier, error) {
 	if err := client.Start(ctx); err != nil {
 		return nil, fmt.Errorf("authverifier: %w", err)
 	}
+	return client, nil
+}
 
-	decoder := jwtdecoder.New(client, jwtdecoder.Config{
+func decoderFor(client *jwks.Client, cfg Config, audience string) output.TokenDecoder {
+	return jwtdecoder.New(client, jwtdecoder.Config{
 		Issuer:   cfg.Issuer,
-		Audience: cfg.Audience,
+		Audience: audience,
 		Leeway:   orDefault(cfg.Leeway, defaultLeeway),
 	})
-
-	return usecase.NewVerifyUseCase(decoder, cfg.Revocation), nil
 }
 
 func orDefault(v, def time.Duration) time.Duration {

@@ -81,11 +81,34 @@ roles := claims.Strings("roles")      // []string normalizado
 | `JWKSURI` | sim | — | endpoint JWKS (https) |
 | `Issuer` | sim | — | `iss` esperado |
 | `Audience` | sim | — | `aud` que este serviço exige |
+| `ServiceAudience` | só p/ `NewPair` | — | `aud` dos tokens de serviço deste serviço |
 | `Leeway` | não | 30s | tolerância de clock skew |
 | `RefreshInterval` | não | 5m | refresh proativo do JWKS |
 | `UnknownKIDCooldown` | não | 20s | anti-DOS em cache miss |
 | `AllowInsecureHTTP` | não | false | permite `http://` (só dev local) |
 | `Revocation` | não | nil | checker da Camada 2 |
+
+## Canal de serviço (M2M)
+
+Rotas internas não devem aceitar o token que o navegador carrega. `NewPair`
+devolve os dois verificadores compartilhando um cliente JWKS, cada um exigindo
+sua audience — a separação é criptográfica, não de rede:
+
+```go
+user, service, err := authverifier.NewPair(ctx, authverifier.Config{
+    JWKSURI:         jwksURI,
+    Issuer:          "saas-access-manager",
+    Audience:        "likes-manager",          // tokens de sessão
+    ServiceAudience: "likes-manager-internal", // tokens de serviço
+})
+
+r.Group("/likes").Use(ginmw.RequireAuth(user))
+r.Group("/internal/likes").Use(ginmw.RequireServiceScope(service, "likes:read-bulk"))
+```
+
+Token de usuário na rota interna => 401 (audience errada). Token de serviço sem
+o escopo => 403. `ginmw.ServiceClaims(c)` expõe `Scope` e `Target` ao handler,
+que aplica o binding ao recurso quando a operação é sobre um id.
 
 ## Arquitetura
 

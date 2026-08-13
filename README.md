@@ -110,6 +110,10 @@ Token de usuário na rota interna => 401 (audience errada). Token de serviço se
 o escopo => 403. `ginmw.ServiceClaims(c)` expõe `Scope` e `Target` ao handler,
 que aplica o binding ao recurso quando a operação é sobre um id.
 
+`Scope` é a lista separada por espaço do RFC 6749: um mesmo token pode cobrir
+várias operações no destino (`"address:read address:write"`), e `HasScope`
+compara por token inteiro — `address:read` não satisfaz `address:read-bulk`.
+
 ### Obtendo o token (lado emissor)
 
 `servicetoken.Provider` pede o token ao Auth Service e o reaproveita até perto
@@ -120,7 +124,7 @@ tokens, err := servicetoken.New(servicetoken.Config{
     TokenURL:     os.Getenv("AUTH_TOKEN_URL"),
     ClientID:     os.Getenv("M2M_CLIENT_ID"),
     ClientSecret: os.Getenv("M2M_CLIENT_SECRET"),
-    Scope:        "likes:read-bulk",
+    Scope:        "likes:read-bulk", // vários: "address:read address:write"
     Audience:     "likes-manager-internal",
 })
 

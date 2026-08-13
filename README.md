@@ -110,6 +110,23 @@ Token de usuário na rota interna => 401 (audience errada). Token de serviço se
 o escopo => 403. `ginmw.ServiceClaims(c)` expõe `Scope` e `Target` ao handler,
 que aplica o binding ao recurso quando a operação é sobre um id.
 
+### Obtendo o token (lado emissor)
+
+`servicetoken.Provider` pede o token ao Auth Service e o reaproveita até perto
+do vencimento — sem ele, cada chamada interna viraria duas:
+
+```go
+tokens, err := servicetoken.New(servicetoken.Config{
+    TokenURL:     os.Getenv("AUTH_TOKEN_URL"),
+    ClientID:     os.Getenv("M2M_CLIENT_ID"),
+    ClientSecret: os.Getenv("M2M_CLIENT_SECRET"),
+    Scope:        "likes:read-bulk",
+    Audience:     "likes-manager-internal",
+})
+
+token, err := tokens.Token(ctx) // usar como "Bearer "+token
+```
+
 ## Arquitetura
 
 Hexagonal, espelhando o serviço principal:

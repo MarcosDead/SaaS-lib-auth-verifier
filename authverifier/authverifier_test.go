@@ -5,7 +5,7 @@ import (
 	"crypto/ed25519"
 	"crypto/sha256"
 	"encoding/base64"
-	"encoding/json"
+	json "encoding/json/v2"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -43,7 +43,7 @@ func newJWKSServer(t *testing.T, pub ed25519.PublicKey, kid string) *jwksServer 
 			"x": base64.RawURLEncoding.EncodeToString(pub),
 		}}}
 		w.Header().Set("Content-Type", "application/jwk-set+json")
-		_ = json.NewEncoder(w).Encode(doc)
+		_ = json.MarshalWrite(w, doc)
 	}))
 	t.Cleanup(js.srv.Close)
 	return js
@@ -227,7 +227,7 @@ func TestRotationPickedUpOnUnknownKID(t *testing.T) {
 			"kid": kidB, "kty": "OKP", "crv": "Ed25519", "use": "sig", "alg": "EdDSA",
 			"x": base64.RawURLEncoding.EncodeToString(pubB),
 		}}}
-		_ = json.NewEncoder(w).Encode(doc)
+		_ = json.MarshalWrite(w, doc)
 	})
 
 	time.Sleep(2 * time.Nanosecond)

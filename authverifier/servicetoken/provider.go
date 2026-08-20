@@ -6,7 +6,7 @@ package servicetoken
 import (
 	"bytes"
 	"context"
-	"encoding/json"
+	json "encoding/json/v2"
 	"fmt"
 	"net/http"
 	"sync"
@@ -109,7 +109,7 @@ func (p *Provider) issue(ctx context.Context) (string, time.Duration, error) {
 	}
 
 	var issued tokenResponse
-	if err := json.NewDecoder(resp.Body).Decode(&issued); err != nil {
+	if err := json.UnmarshalRead(resp.Body, &issued); err != nil {
 		return "", 0, err
 	}
 	if issued.AccessToken == "" || issued.ExpiresIn <= 0 {

@@ -2,7 +2,7 @@ package servicetoken_test
 
 import (
 	"context"
-	"encoding/json"
+	json "encoding/json/v2"
 	"net/http"
 	"net/http/httptest"
 	"sync"
@@ -26,7 +26,7 @@ func newAuthStub(t *testing.T) *authStub {
 	stub.srv = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		stub.mu.Lock()
 		stub.issued++
-		_ = json.NewDecoder(r.Body).Decode(&stub.lastBody)
+		_ = json.UnmarshalRead(r.Body, &stub.lastBody)
 		status, expiresIn := stub.status, stub.expiresIn
 		stub.mu.Unlock()
 
@@ -34,7 +34,7 @@ func newAuthStub(t *testing.T) *authStub {
 			w.WriteHeader(status)
 			return
 		}
-		_ = json.NewEncoder(w).Encode(map[string]any{
+		_ = json.MarshalWrite(w, map[string]any{
 			"access_token": "svc-token", "expires_in": expiresIn,
 		})
 	}))

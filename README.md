@@ -74,6 +74,30 @@ email := claims.String("email")       // "" se ausente
 roles := claims.Strings("roles")      // []string normalizado
 ```
 
+## Papéis
+
+O nome da claim é da lib (`model.ClaimRoles`), e não de cada serviço: o emissor é
+um só, então se ele mudar, muda num lugar e todos os consumidores continuam
+concordando sobre onde procurar.
+
+```go
+claims.HasRole("SUPER_ADMIN")              // comparação exata
+claims.HasAnyRole("ADMIN", "SUPER_ADMIN")  // false quando nenhum papel é exigido
+```
+
+Como middleware, sempre depois de `RequireAuth`. Sem claims a resposta é 401, e
+não 403: quem nem se identificou não teve o acesso negado, ainda não foi
+reconhecido.
+
+```go
+panel := router.Group("/backoffice")
+panel.Use(ginmw.RequireAuth(verifier), ginmw.RequireRole("SUPER_ADMIN"))
+```
+
+A comparação é sensível a maiúsculas de propósito: papel é identificador, não
+texto livre, e aceitar variação deixaria um `super_admin` passar por
+`SUPER_ADMIN`.
+
 ## Configuração
 
 | Campo | Obrigatório | Default | Descrição |

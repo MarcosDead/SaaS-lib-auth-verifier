@@ -52,6 +52,30 @@ func (c *Claims) Strings(name string) []string {
 	}
 }
 
+const ClaimRoles = "roles"
+
+// Comparação exata: papel é identificador, não texto livre.
+func (c *Claims) HasRole(role string) bool {
+	if role == "" {
+		return false
+	}
+	for _, r := range c.Strings(ClaimRoles) {
+		if r == role {
+			return true
+		}
+	}
+	return false
+}
+
+func (c *Claims) HasAnyRole(roles ...string) bool {
+	for _, role := range roles {
+		if c.HasRole(role) {
+			return true
+		}
+	}
+	return false
+}
+
 // HasAudience indica se o token foi destinado a um audience específico.
 func (c *Claims) HasAudience(aud string) bool {
 	for _, a := range c.Audience {

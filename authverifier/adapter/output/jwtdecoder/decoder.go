@@ -12,16 +12,16 @@ import (
 )
 
 const (
-	bearerPrefix  = "Bearer "
-	signingMethod = "EdDSA"
-	headerKID     = "kid"
+	bearerPrefix = "Bearer "
+	headerKID    = "kid"
 )
 
 // Config parametriza a validação das claims registradas.
 type Config struct {
-	Issuer   string        // iss esperado (obrigatório)
-	Audience string        // aud que ESTE serviço exige (obrigatório)
-	Leeway   time.Duration // tolerância de clock skew em exp/nbf/iat
+	Issuer     string        // iss esperado (obrigatório)
+	Audience   string        // aud que ESTE serviço exige (obrigatório)
+	Algorithms []string      // algoritmos de assinatura aceitos (obrigatório)
+	Leeway     time.Duration // tolerância de clock skew em exp/nbf/iat
 }
 
 // Decoder valida tokens criptograficamente com golang-jwt, resolvendo a chave
@@ -36,7 +36,7 @@ func New(keys output.KeySetProvider, cfg Config) *Decoder {
 		// Pin do algoritmo: defesa central contra algorithm confusion. Sem isto,
 		// um atacante poderia forjar alg=none ou alg=HS* usando a chave pública
 		// (conhecida) como segredo HMAC.
-		jwt.WithValidMethods([]string{signingMethod}),
+		jwt.WithValidMethods(cfg.Algorithms),
 		jwt.WithIssuer(cfg.Issuer),
 		jwt.WithExpirationRequired(),
 		jwt.WithLeeway(cfg.Leeway),
@@ -63,12 +63,10 @@ func (d *Decoder) Decode(ctx context.Context, rawToken string) (*model.Claims, e
 
 // keyFunc resolve a chave pública a partir do kid. O kid é input controlado pelo
 // atacante: usado EXCLUSIVAMENTE como lookup no KeySetProvider (jamais como
-// path/URL/query). Reverifica o método de assinatura como defesa em profundidade.
+// path/URL/query). O algoritmo já foi conferido contra a allowlist, e a
+// golang-jwt recusa uma chave de tipo diferente do algoritmo do header.
 func (d *Decoder) keyFunc(ctx context.Context) jwt.Keyfunc {
 	return func(t *jwt.Token) (interface{}, error) {
-		if _, ok := t.Method.(*jwt.SigningMethodEd25519); !ok {
-			return nil, errs.ErrInvalidToken
-		}
 		kid, _ := t.Header[headerKID].(string)
 		if kid == "" {
 			return nil, errs.ErrInvalidToken

@@ -8,7 +8,7 @@ import (
 
 // TokenVerifier é o port que os serviços consumidores dependem. Recebe o valor
 // bruto do header Authorization (com ou sem o prefixo "Bearer ") e devolve a
-// identidade autenticada ou um erro de domínio (errs.ErrInvalidToken/ErrRevoked).
+// identidade autenticada ou errs.ErrInvalidToken.
 //
 // No caminho feliz, a implementação valida localmente (assinatura + claims) sem
 // network call — a chave pública já está em cache. Network só ocorre em refresh

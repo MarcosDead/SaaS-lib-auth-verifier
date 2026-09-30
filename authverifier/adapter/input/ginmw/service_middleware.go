@@ -11,8 +11,7 @@ import (
 const contextKeyServiceClaims = "auth.service.claims"
 
 // RequireServiceScope protege rotas máquina-a-máquina. Token inválido ou de
-// usuário => 401; escopo ausente => 403. O binding ao recurso (Target) fica com
-// o handler, que é quem conhece o id da rota.
+// usuário => 401; escopo ausente => 403.
 func RequireServiceScope(verifier input.ServiceTokenVerifier, scope string) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		claims, err := verifier.VerifyService(c.Request.Context(), c.GetHeader(authorizationHeader))

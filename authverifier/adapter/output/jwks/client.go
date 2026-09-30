@@ -3,7 +3,6 @@ package jwks
 import (
 	"context"
 	"crypto"
-	"crypto/ed25519"
 	json "encoding/json/v2"
 	"fmt"
 	"io"
@@ -39,7 +38,7 @@ type Config struct {
 // snapshot é o estado imutável do cache. Trocado atomicamente a cada refresh —
 // leituras (PublicKey) são lock-free.
 type snapshot struct {
-	keys map[string]ed25519.PublicKey
+	keys map[string]crypto.PublicKey
 	etag string
 }
 
@@ -85,7 +84,7 @@ func NewClient(cfg Config) (*Client, error) {
 	if c.httpClient == nil {
 		c.httpClient = &http.Client{Timeout: c.requestTimeout}
 	}
-	c.snap.Store(&snapshot{keys: map[string]ed25519.PublicKey{}})
+	c.snap.Store(&snapshot{keys: map[string]crypto.PublicKey{}})
 	return c, nil
 }
 
@@ -184,9 +183,9 @@ func (c *Client) fetch(ctx context.Context) error {
 		return fmt.Errorf("decoding JWKS: %w", err)
 	}
 
-	keys := make(map[string]ed25519.PublicKey, len(doc.Keys))
+	keys := make(map[string]crypto.PublicKey, len(doc.Keys))
 	for _, jwk := range doc.Keys {
-		pub, err := parseEd25519(jwk)
+		pub, err := parseKey(jwk)
 		if err != nil {
 			continue // ignora chaves não suportadas/inválidas sem derrubar o set
 		}
@@ -194,7 +193,7 @@ func (c *Client) fetch(ctx context.Context) error {
 	}
 	if len(keys) == 0 {
 		// Não substituir um cache possivelmente bom por um vazio.
-		return fmt.Errorf("JWKS contained no usable Ed25519 keys")
+		return fmt.Errorf("JWKS contained no usable signing keys")
 	}
 
 	c.snap.Store(&snapshot{keys: keys, etag: resp.Header.Get("ETag")})

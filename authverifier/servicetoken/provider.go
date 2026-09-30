@@ -1,14 +1,15 @@
-// Package servicetoken obtém tokens de serviço (client credentials) no Auth
-// Service e os reaproveita até perto do vencimento. É a ponta emissora do canal
-// M2M; a verificadora é o ginmw.RequireServiceScope.
+// Package servicetoken obtém tokens de serviço pelo grant client_credentials
+// (RFC 6749 §4.4) no token endpoint do emissor e os reaproveita até perto do
+// vencimento. A ponta verificadora é o ginmw.RequireServiceScope.
 package servicetoken
 
 import (
-	"bytes"
 	"context"
 	json "encoding/json/v2"
 	"fmt"
 	"net/http"
+	"net/url"
+	"strings"
 	"sync"
 	"time"
 )
@@ -18,11 +19,10 @@ import (
 const renewMargin = 10 * time.Second
 
 type Config struct {
-	TokenURL     string // POST /auth/token do Auth Service
+	TokenURL     string // token endpoint do emissor
 	ClientID     string
 	ClientSecret string
-	Scope        string
-	Audience     string // serviço de destino; vazio = o próprio Auth Service
+	Scope        string // opcional: vazio = os escopos padrão do client
 	HTTPClient   *http.Client
 }
 
@@ -38,8 +38,8 @@ type Provider struct {
 }
 
 func New(cfg Config) (*Provider, error) {
-	if cfg.TokenURL == "" || cfg.ClientID == "" || cfg.ClientSecret == "" || cfg.Scope == "" {
-		return nil, fmt.Errorf("servicetoken: TokenURL, ClientID, ClientSecret e Scope são obrigatórios")
+	if cfg.TokenURL == "" || cfg.ClientID == "" || cfg.ClientSecret == "" {
+		return nil, fmt.Errorf("servicetoken: TokenURL, ClientID e ClientSecret são obrigatórios")
 	}
 	client := cfg.HTTPClient
 	if client == nil {
@@ -67,36 +67,23 @@ func (p *Provider) Token(ctx context.Context) (string, error) {
 	return token, nil
 }
 
-type tokenRequest struct {
-	GrantType    string `json:"grant_type"`
-	ClientID     string `json:"client_id"`
-	ClientSecret string `json:"client_secret"`
-	Scope        string `json:"scope"`
-	Audience     string `json:"audience,omitempty"`
-}
-
 type tokenResponse struct {
 	AccessToken string `json:"access_token"`
 	ExpiresIn   int    `json:"expires_in"`
 }
 
 func (p *Provider) issue(ctx context.Context) (string, time.Duration, error) {
-	body, err := json.Marshal(tokenRequest{
-		GrantType:    "client_credentials",
-		ClientID:     p.cfg.ClientID,
-		ClientSecret: p.cfg.ClientSecret,
-		Scope:        p.cfg.Scope,
-		Audience:     p.cfg.Audience,
-	})
-	if err != nil {
-		return "", 0, err
+	form := url.Values{"grant_type": {"client_credentials"}}
+	if p.cfg.Scope != "" {
+		form.Set("scope", p.cfg.Scope)
 	}
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, p.cfg.TokenURL, bytes.NewReader(body))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, p.cfg.TokenURL, strings.NewReader(form.Encode()))
 	if err != nil {
 		return "", 0, err
 	}
-	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.SetBasicAuth(url.QueryEscape(p.cfg.ClientID), url.QueryEscape(p.cfg.ClientSecret))
 
 	resp, err := p.client.Do(req)
 	if err != nil {
@@ -105,7 +92,7 @@ func (p *Provider) issue(ctx context.Context) (string, time.Duration, error) {
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		return "", 0, fmt.Errorf("servicetoken: auth service respondeu %d", resp.StatusCode)
+		return "", 0, fmt.Errorf("servicetoken: token endpoint respondeu %d", resp.StatusCode)
 	}
 
 	var issued tokenResponse

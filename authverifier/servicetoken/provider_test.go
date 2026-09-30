@@ -5,6 +5,7 @@ import (
 	json "encoding/json/v2"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"sync"
 	"testing"
 
@@ -17,7 +18,9 @@ type authStub struct {
 	expiresIn int
 	status    int
 	mu        sync.Mutex
-	lastBody  map[string]any
+	lastForm  url.Values
+	lastUser  string
+	lastPass  string
 }
 
 func newAuthStub(t *testing.T) *authStub {
@@ -26,7 +29,9 @@ func newAuthStub(t *testing.T) *authStub {
 	stub.srv = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		stub.mu.Lock()
 		stub.issued++
-		_ = json.UnmarshalRead(r.Body, &stub.lastBody)
+		_ = r.ParseForm()
+		stub.lastForm = r.PostForm
+		stub.lastUser, stub.lastPass, _ = r.BasicAuth()
 		status, expiresIn := stub.status, stub.expiresIn
 		stub.mu.Unlock()
 
@@ -46,7 +51,6 @@ func newProvider(t *testing.T, stub *authStub) *servicetoken.Provider {
 	t.Helper()
 	p, err := servicetoken.New(servicetoken.Config{
 		TokenURL: stub.srv.URL, ClientID: "stories-manager", ClientSecret: "s3cr3t",
-		Scope: "likes:read-bulk", Audience: "likes-manager-internal",
 	})
 	if err != nil {
 		t.Fatalf("New: %v", err)
@@ -87,7 +91,9 @@ func TestTokenRenewedWhenWithinMargin(t *testing.T) {
 	}
 }
 
-func TestScopeAndAudienceAreSent(t *testing.T) {
+// RFC 6749 §4.4: form-urlencoded, credencial do client em Basic, sem scope quando
+// o client usa os escopos padrão.
+func TestRequestFollowsClientCredentialsGrant(t *testing.T) {
 	stub := newAuthStub(t)
 	provider := newProvider(t, stub)
 
@@ -95,11 +101,28 @@ func TestScopeAndAudienceAreSent(t *testing.T) {
 		t.Fatalf("Token: %v", err)
 	}
 
-	if stub.lastBody["scope"] != "likes:read-bulk" || stub.lastBody["audience"] != "likes-manager-internal" {
-		t.Fatalf("corpo enviado = %v", stub.lastBody)
+	if stub.lastForm.Get("grant_type") != "client_credentials" || stub.lastForm.Has("scope") {
+		t.Fatalf("form enviado = %v", stub.lastForm)
 	}
-	if stub.lastBody["grant_type"] != "client_credentials" {
-		t.Fatalf("grant_type = %v", stub.lastBody["grant_type"])
+	if stub.lastUser != "stories-manager" || stub.lastPass != "s3cr3t" {
+		t.Fatalf("basic auth = %q/%q", stub.lastUser, stub.lastPass)
+	}
+}
+
+func TestScopeIsSentWhenConfigured(t *testing.T) {
+	stub := newAuthStub(t)
+	provider, err := servicetoken.New(servicetoken.Config{
+		TokenURL: stub.srv.URL, ClientID: "stories-manager", ClientSecret: "s3cr3t", Scope: "likes:read-bulk",
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	if _, err := provider.Token(context.Background()); err != nil {
+		t.Fatalf("Token: %v", err)
+	}
+	if stub.lastForm.Get("scope") != "likes:read-bulk" {
+		t.Fatalf("scope = %q", stub.lastForm.Get("scope"))
 	}
 }
 

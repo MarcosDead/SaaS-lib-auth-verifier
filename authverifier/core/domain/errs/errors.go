@@ -10,11 +10,6 @@ var (
 	// expirado, issuer/audience errados, alg não permitido, kid desconhecido.
 	ErrInvalidToken = errors.New("invalid token")
 
-	// ErrRevoked sinaliza que o token é criptograficamente válido mas foi
-	// revogado (logout, troca de senha, breach). Separado de ErrInvalidToken só
-	// para observabilidade do consumidor — a resposta ao cliente é a mesma 401.
-	ErrRevoked = errors.New("token revoked")
-
 	// ErrKeyNotFound é interno ao resolver de chaves: o kid do token não está no
 	// JWKS em cache nem após refresh. O use case o converte em ErrInvalidToken.
 	ErrKeyNotFound = errors.New("signing key not found for kid")

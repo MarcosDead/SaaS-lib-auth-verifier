@@ -3,10 +3,13 @@ package authverifier_test
 import (
 	"context"
 	"crypto/ed25519"
+	"crypto/rand"
+	"crypto/rsa"
 	"crypto/sha256"
 	"encoding/base64"
 	json "encoding/json/v2"
 	"fmt"
+	"math/big"
 	"net/http"
 	"net/http/httptest"
 	"sync/atomic"
@@ -14,8 +17,6 @@ import (
 	"time"
 
 	"github.com/MarcosDead/SaaS-lib-auth-verifier/authverifier"
-	"github.com/MarcosDead/SaaS-lib-auth-verifier/authverifier/core/domain/errs"
-	"github.com/MarcosDead/SaaS-lib-auth-verifier/authverifier/core/domain/model"
 	"github.com/golang-jwt/jwt/v5"
 )
 
@@ -74,16 +75,6 @@ func validClaims() jwt.MapClaims {
 		"jti": "jti-1", "email": "a@b.com", "roles": []string{"admin"},
 		"iat": now.Unix(), "nbf": now.Unix(), "exp": now.Add(10 * time.Minute).Unix(),
 	}
-}
-
-// revokerStub é um RevocationChecker controlável para os testes da Camada 2.
-type revokerStub struct {
-	revoked bool
-	err     error
-}
-
-func (r revokerStub) IsRevoked(context.Context, *model.Claims) (bool, error) {
-	return r.revoked, r.err
 }
 
 func setup(t *testing.T) (ed25519.PrivateKey, string, *jwksServer) {
@@ -236,32 +227,93 @@ func TestRotationPickedUpOnUnknownKID(t *testing.T) {
 	}
 }
 
-func TestRevocationCheckerFailClosed(t *testing.T) {
-	priv, kid, js := setup(t)
-	v, _ := authverifier.New(context.Background(), authverifier.Config{
-		JWKSURI: js.srv.URL, Issuer: testIssuer, Audience: testAudience, AllowInsecureHTTP: true,
-		Revocation: revokerStub{err: fmt.Errorf("redis down")},
-	})
-	if _, err := v.Verify(context.Background(), signToken(t, priv, kid, validClaims())); err != errs.ErrInvalidToken {
-		t.Fatalf("esperava Fail-Closed (ErrInvalidToken), veio: %v", err)
-	}
-}
-
-func TestRevocationCheckerRevokes(t *testing.T) {
-	priv, kid, js := setup(t)
-	v, _ := authverifier.New(context.Background(), authverifier.Config{
-		JWKSURI: js.srv.URL, Issuer: testIssuer, Audience: testAudience, AllowInsecureHTTP: true,
-		Revocation: revokerStub{revoked: true},
-	})
-	if _, err := v.Verify(context.Background(), signToken(t, priv, kid, validClaims())); err != errs.ErrRevoked {
-		t.Fatalf("esperava ErrRevoked, veio: %v", err)
-	}
-}
-
 func TestHTTPSRequiredByDefault(t *testing.T) {
 	if _, err := authverifier.New(context.Background(), authverifier.Config{
 		JWKSURI: "http://insecure.example/jwks.json", Issuer: testIssuer, Audience: testAudience,
 	}); err == nil {
 		t.Fatal("JWKS URI http:// foi aceita sem AllowInsecureHTTP")
 	}
+}
+
+// Emissores como o Keycloak não derivam o kid do thumbprint, publicam chaves RSA
+// e de cifra no mesmo JWKS. O que vale é a chave de assinatura achada pelo kid.
+func TestProviderStyleJWKSWithRSA(t *testing.T) {
+	rsaKey, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		t.Fatalf("keygen: %v", err)
+	}
+	encKey, _ := rsa.GenerateKey(rand.Reader, 2048)
+	edPub, _, _ := ed25519.GenerateKey(nil)
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.MarshalWrite(w, map[string]any{"keys": []map[string]string{
+			rsaJWK("sig-rsa", "sig", &rsaKey.PublicKey),
+			rsaJWK("enc-rsa", "enc", &encKey.PublicKey),
+			{"kid": "ed-arbitrario", "kty": "OKP", "crv": "Ed25519", "x": base64.RawURLEncoding.EncodeToString(edPub)},
+			{"kid": "ec", "kty": "EC", "crv": "P-256"},
+		}})
+	}))
+	t.Cleanup(srv.Close)
+
+	v, err := authverifier.New(context.Background(), authverifier.Config{
+		JWKSURI: srv.URL, Issuer: testIssuer, Audience: testAudience,
+		Algorithms: []string{"RS256"}, AllowInsecureHTTP: true,
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	if _, err := v.Verify(context.Background(), signRSA(t, rsaKey, "sig-rsa", validClaims())); err != nil {
+		t.Fatalf("token RS256 rejeitado: %v", err)
+	}
+	if _, err := v.Verify(context.Background(), signRSA(t, encKey, "enc-rsa", validClaims())); err == nil {
+		t.Fatal("token assinado com chave de cifra foi aceito")
+	}
+}
+
+func TestAlgorithmOutsideAllowlistRejected(t *testing.T) {
+	rsaKey, _ := rsa.GenerateKey(rand.Reader, 2048)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.MarshalWrite(w, map[string]any{"keys": []map[string]string{rsaJWK("k", "sig", &rsaKey.PublicKey)}})
+	}))
+	t.Cleanup(srv.Close)
+
+	v, err := authverifier.New(context.Background(), authverifier.Config{
+		JWKSURI: srv.URL, Issuer: testIssuer, Audience: testAudience, AllowInsecureHTTP: true,
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	if _, err := v.Verify(context.Background(), signRSA(t, rsaKey, "k", validClaims())); err == nil {
+		t.Fatal("RS256 aceito com a allowlist padrão (EdDSA)")
+	}
+}
+
+func TestSymmetricAlgorithmConfigRejected(t *testing.T) {
+	_, _, js := setup(t)
+	if _, err := authverifier.New(context.Background(), authverifier.Config{
+		JWKSURI: js.srv.URL, Issuer: testIssuer, Audience: testAudience,
+		Algorithms: []string{"HS256"}, AllowInsecureHTTP: true,
+	}); err == nil {
+		t.Fatal("HS256 aceito na configuração")
+	}
+}
+
+func rsaJWK(kid, use string, pub *rsa.PublicKey) map[string]string {
+	return map[string]string{
+		"kid": kid, "kty": "RSA", "use": use, "alg": "RS256",
+		"n": base64.RawURLEncoding.EncodeToString(pub.N.Bytes()),
+		"e": base64.RawURLEncoding.EncodeToString(big.NewInt(int64(pub.E)).Bytes()),
+	}
+}
+
+func signRSA(t *testing.T, key *rsa.PrivateKey, kid string, claims jwt.MapClaims) string {
+	t.Helper()
+	tok := jwt.NewWithClaims(jwt.SigningMethodRS256, claims)
+	tok.Header["kid"] = kid
+	raw, err := tok.SignedString(key)
+	if err != nil {
+		t.Fatalf("signing: %v", err)
+	}
+	return raw
 }

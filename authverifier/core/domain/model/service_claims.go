@@ -2,14 +2,11 @@ package model
 
 import "strings"
 
-// ServiceClaims é a identidade de um token de serviço (client credentials).
-// Não é sessão: vale para as operações em Scope e, quando o emissor amarra,
-// para um recurso só (Target).
+// ServiceClaims é a identidade de um token de serviço (client credentials):
+// quem chama (Client) e o que pode fazer (Scope). Não é sessão.
 type ServiceClaims struct {
-	Subject string
-	Scope   string
-	Target  string
-	JTI     string
+	Client string
+	Scope  string
 }
 
 // HasScope compara por token inteiro: "posts:read" não satisfaz "posts:read-owner".
@@ -25,8 +22,8 @@ func (c *ServiceClaims) HasScope(scope string) bool {
 	return false
 }
 
-// ServiceClaimsFrom devolve nil quando o token não tem escopo — sinal de que é
-// token de usuário, não de serviço.
+// ServiceClaimsFrom devolve nil para token sem escopo. O chamador vem de azp
+// (OIDC), com client_id como alternativa de emissores que só usam esse nome.
 func ServiceClaimsFrom(claims *Claims) *ServiceClaims {
 	if claims == nil {
 		return nil
@@ -35,10 +32,9 @@ func ServiceClaimsFrom(claims *Claims) *ServiceClaims {
 	if scope == "" {
 		return nil
 	}
-	return &ServiceClaims{
-		Subject: claims.Subject,
-		Scope:   scope,
-		Target:  claims.String("target"),
-		JTI:     claims.JTI,
+	client := claims.String("azp")
+	if client == "" {
+		client = claims.String("client_id")
 	}
+	return &ServiceClaims{Client: client, Scope: scope}
 }

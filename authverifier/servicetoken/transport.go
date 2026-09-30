@@ -12,6 +12,14 @@ func (p *Provider) Transport(base http.RoundTripper) http.RoundTripper {
 	return &transport{provider: p, base: base}
 }
 
+// Client devolve uma cópia de base (timeout, instrumentação) que autoriza cada
+// requisição com o token de serviço.
+func (p *Provider) Client(base *http.Client) *http.Client {
+	authorized := *base
+	authorized.Transport = p.Transport(base.Transport)
+	return &authorized
+}
+
 type transport struct {
 	provider *Provider
 	base     http.RoundTripper

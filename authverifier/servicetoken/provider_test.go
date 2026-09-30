@@ -152,7 +152,7 @@ func TestTransportAuthorizesEachRequest(t *testing.T) {
 	}))
 	t.Cleanup(target.Close)
 
-	client := &http.Client{Transport: provider.Transport(nil)}
+	client := provider.Client(&http.Client{})
 	resp, err := client.Get(target.URL)
 	if err != nil {
 		t.Fatalf("Get: %v", err)

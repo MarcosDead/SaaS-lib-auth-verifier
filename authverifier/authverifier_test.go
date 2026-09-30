@@ -235,7 +235,7 @@ func TestHTTPSRequiredByDefault(t *testing.T) {
 	}
 }
 
-// Emissores como o Keycloak não derivam o kid do thumbprint, publicam chaves RSA
+// Emissores que não derivam o kid do thumbprint, publicam chaves RSA
 // e de cifra no mesmo JWKS. O que vale é a chave de assinatura achada pelo kid.
 func TestProviderStyleJWKSWithRSA(t *testing.T) {
 	rsaKey, err := rsa.GenerateKey(rand.Reader, 2048)

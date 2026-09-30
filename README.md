@@ -157,6 +157,9 @@ tokens, err := servicetoken.New(servicetoken.Config{
 })
 
 token, err := tokens.Token(ctx) // usar como "Bearer "+token
+
+// ou deixar o http.Client autorizar cada requisição:
+client := &http.Client{Transport: tokens.Transport(nil)}
 ```
 
 ## Arquitetura

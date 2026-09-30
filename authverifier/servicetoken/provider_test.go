@@ -141,3 +141,36 @@ func TestConfigIsValidated(t *testing.T) {
 		t.Fatal("configuração incompleta foi aceita")
 	}
 }
+
+func TestTransportAuthorizesEachRequest(t *testing.T) {
+	stub := newAuthStub(t)
+	provider := newProvider(t, stub)
+
+	var got string
+	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		got = r.Header.Get("Authorization")
+	}))
+	t.Cleanup(target.Close)
+
+	client := &http.Client{Transport: provider.Transport(nil)}
+	resp, err := client.Get(target.URL)
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	resp.Body.Close()
+
+	if got != "Bearer svc-token" {
+		t.Fatalf("Authorization = %q", got)
+	}
+}
+
+func TestTransportFailsWhenTokenIsUnavailable(t *testing.T) {
+	stub := newAuthStub(t)
+	stub.status = http.StatusUnauthorized
+	provider := newProvider(t, stub)
+
+	client := &http.Client{Transport: provider.Transport(nil)}
+	if _, err := client.Get("http://127.0.0.1:1"); err == nil {
+		t.Fatal("requisição saiu sem token")
+	}
+}
